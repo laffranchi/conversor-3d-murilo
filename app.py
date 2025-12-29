@@ -6,40 +6,39 @@ from sklearn.cluster import MiniBatchKMeans
 import io
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="GLB to 3MF v3", page_icon="🎨", layout="centered")
+st.set_page_config(page_title="GLB to 3MF v5 (RGB)", page_icon="🎨", layout="wide")
 
 st.markdown("""
     <style>
     .stButton>button {width: 100%; background-color: #0068c9; color: white;}
     .stApp {background-color: #0e1117; color: white;}
+    .color-box {
+        width: 100%;
+        height: 34px;
+        border-radius: 5px;
+        border: 1px solid #ffffff50;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNÇÃO CORRIGIDA (V3) ---
+# --- FUNÇÃO PRINCIPAL ---
 def process_glb(file_bytes, n_colors):
     file_obj = io.BytesIO(file_bytes)
     mesh = trimesh.load(file_obj, file_type='glb', force='mesh')
     
-    # --- PARTE 1: DETECÇÃO DE TEXTURA (A que funcionou!) ---
+    # Detecção de Textura
     texture = None
     try:
         mat = mesh.visual.material
         if isinstance(mat, list): mat = mat[0]
-            
-        if hasattr(mat, 'baseColorTexture') and mat.baseColorTexture:
-            texture = mat.baseColorTexture
-        elif hasattr(mat, 'image') and mat.image:
-            texture = mat.image
-        elif isinstance(mat, dict) and 'image' in mat:
-            texture = mat['image']
-            
-    except Exception as e:
-        st.warning(f"Aviso: {e}")
+        if hasattr(mat, 'baseColorTexture') and mat.baseColorTexture: texture = mat.baseColorTexture
+        elif hasattr(mat, 'image') and mat.image: texture = mat.image
+        elif isinstance(mat, dict) and 'image' in mat: texture = mat['image']
+    except Exception: pass
 
-    if texture is None:
-        raise ValueError("ERRO: Não achei textura. O arquivo pode não ter cor.")
+    if texture is None: raise ValueError("Sem textura encontrada.")
 
-    # --- PARTE 2: PROCESSAMENTO ---
+    # Processamento
     if texture.mode != 'RGB': texture = texture.convert('RGB')
     tex_array = np.array(texture)
     h, w, _ = tex_array.shape
@@ -56,8 +55,10 @@ def process_glb(file_bytes, n_colors):
     labels = kmeans.fit_predict(face_colors)
     centroids = kmeans.cluster_centers_.astype(int)
 
-    # --- PARTE 3: CRIAÇÃO DAS PEÇAS ---
+    # Geração das Partes
     sub_meshes = []
+    palette_data = []
+
     for i in range(n_colors):
         mask = labels == i
         if not np.any(mask): continue
@@ -65,29 +66,60 @@ def process_glb(file_bytes, n_colors):
         part = mesh.submesh([mask], append=True)
         if isinstance(part, list): part = trimesh.util.concatenate(part)
         
-        # Corrige visualização
+        part_name = f"Cor_{i+1}"
+        part.metadata['name'] = part_name
         part.visual.face_colors = np.append(centroids[i], 255)
-        part.metadata['name'] = f"Cor_{i+1}"
         sub_meshes.append(part)
+        
+        # --- CRIAÇÃO DO FORMATO RGB (R, G, B) ---
+        r, g, b = centroids[i]
+        rgb_string = f"{r},{g},{b}" # Formato limpo para o Orca
+        hex_color = '#{:02x}{:02x}{:02x}'.format(r, g, b) # Apenas para o quadrado visual
+        
+        palette_data.append({
+            "name": part_name,
+            "rgb": rgb_string,
+            "hex": hex_color
+        })
 
     scene = trimesh.Scene(sub_meshes)
-
-    # --- CORREÇÃO AQUI (O ERRO ESTAVA AQUI) ---
-    # Usamos o método direto da cena, que retorna os bytes automaticamente
-    return scene.export(file_type='3mf')
+    return scene.export(file_type='3mf'), palette_data
 
 # --- INTERFACE ---
-st.title("🎨 Conversor v3.0 (Export Fix)") 
-st.markdown("Agora com correção de salvamento.")
+st.title("🎨 Conversor v5.0 (Saída RGB)") 
 
-uploaded_file = st.file_uploader("Arquivo GLB", type="glb")
-colors = st.slider("Cores", 2, 16, 8)
+col1, col2 = st.columns([1, 1])
 
-if uploaded_file and st.button("Processar"):
-    with st.spinner("Processando e salvando..."):
+with col1:
+    st.subheader("1. Arquivo e Configuração")
+    uploaded_file = st.file_uploader("Arquivo GLB", type="glb")
+    colors = st.slider("Quantidade de Cores", 2, 16, 8)
+    process_btn = st.button("Processar Cores")
+
+if uploaded_file and process_btn:
+    with st.spinner("Analisando cores..."):
         try:
-            result = process_glb(uploaded_file.getvalue(), colors)
-            st.success("Sucesso! Baixe agora.")
-            st.download_button("Baixar 3MF", result, "modelo_final.3mf", "model/3mf")
+            file_data, palette = process_glb(uploaded_file.getvalue(), colors)
+            
+            with col1:
+                st.success("Sucesso!")
+                st.download_button("⬇️ Baixar 3MF", file_data, "modelo_rgb.3mf", "model/3mf")
+
+            # --- GABARITO RGB ---
+            with col2:
+                st.subheader("2. Gabarito (Copie para o Orca)")
+                st.info("Copie os códigos abaixo e cole na cor do filamento.")
+                
+                for p in palette:
+                    c1, c2, c3 = st.columns([1, 2, 3])
+                    with c1:
+                        # Mostra a cor visualmente
+                        st.markdown(f'<div class="color-box" style="background-color: {p["hex"]};"></div>', unsafe_allow_html=True)
+                    with c2:
+                        st.write(f"**{p['name']}**")
+                    with c3:
+                        # Mostra o código RGB pronto para copiar
+                        st.code(p['rgb'], language="text")
+
         except Exception as e:
             st.error(f"Erro: {e}")
