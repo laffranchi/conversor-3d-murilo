@@ -6,7 +6,7 @@ from sklearn.cluster import MiniBatchKMeans
 import io
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="GLB to 3MF v5 (RGB)", page_icon="🎨", layout="wide")
+st.set_page_config(page_title="GLB to 3MF v6 (Fixed)", page_icon="🎨", layout="wide")
 
 st.markdown("""
     <style>
@@ -71,10 +71,10 @@ def process_glb(file_bytes, n_colors):
         part.visual.face_colors = np.append(centroids[i], 255)
         sub_meshes.append(part)
         
-        # --- CRIAÇÃO DO FORMATO RGB (R, G, B) ---
+        # RGB String
         r, g, b = centroids[i]
-        rgb_string = f"{r},{g},{b}" # Formato limpo para o Orca
-        hex_color = '#{:02x}{:02x}{:02x}'.format(r, g, b) # Apenas para o quadrado visual
+        rgb_string = f"{r},{g},{b}" 
+        hex_color = '#{:02x}{:02x}{:02x}'.format(r, g, b)
         
         palette_data.append({
             "name": part_name,
@@ -86,7 +86,7 @@ def process_glb(file_bytes, n_colors):
     return scene.export(file_type='3mf'), palette_data
 
 # --- INTERFACE ---
-st.title("🎨 Conversor v5.0 (Saída RGB)") 
+st.title("🎨 Conversor v6.0 (Persistente)") 
 
 col1, col2 = st.columns([1, 1])
 
@@ -94,32 +94,43 @@ with col1:
     st.subheader("1. Arquivo e Configuração")
     uploaded_file = st.file_uploader("Arquivo GLB", type="glb")
     colors = st.slider("Quantidade de Cores", 2, 16, 8)
-    process_btn = st.button("Processar Cores")
+    
+    # Botão de processar
+    if st.button("Processar Cores"):
+        if uploaded_file:
+            with st.spinner("Analisando cores..."):
+                try:
+                    # Processa e SALVA NA MEMÓRIA (Session State)
+                    file_data, palette = process_glb(uploaded_file.getvalue(), colors)
+                    st.session_state['3mf_data'] = file_data
+                    st.session_state['palette_data'] = palette
+                    st.session_state['processed'] = True
+                except Exception as e:
+                    st.error(f"Erro: {e}")
 
-if uploaded_file and process_btn:
-    with st.spinner("Analisando cores..."):
-        try:
-            file_data, palette = process_glb(uploaded_file.getvalue(), colors)
-            
-            with col1:
-                st.success("Sucesso!")
-                st.download_button("⬇️ Baixar 3MF", file_data, "modelo_rgb.3mf", "model/3mf")
+# --- EXIBIÇÃO DOS RESULTADOS (Lê da Memória) ---
+if 'processed' in st.session_state and st.session_state['processed']:
+    
+    # Coluna 1: Download
+    with col1:
+        st.success("Processado com sucesso!")
+        st.download_button(
+            label="⬇️ Baixar 3MF", 
+            data=st.session_state['3mf_data'], 
+            file_name="modelo_rgb.3mf", 
+            mime="model/3mf"
+        )
 
-            # --- GABARITO RGB ---
-            with col2:
-                st.subheader("2. Gabarito (Copie para o Orca)")
-                st.info("Copie os códigos abaixo e cole na cor do filamento.")
-                
-                for p in palette:
-                    c1, c2, c3 = st.columns([1, 2, 3])
-                    with c1:
-                        # Mostra a cor visualmente
-                        st.markdown(f'<div class="color-box" style="background-color: {p["hex"]};"></div>', unsafe_allow_html=True)
-                    with c2:
-                        st.write(f"**{p['name']}**")
-                    with c3:
-                        # Mostra o código RGB pronto para copiar
-                        st.code(p['rgb'], language="text")
-
-        except Exception as e:
-            st.error(f"Erro: {e}")
+    # Coluna 2: Gabarito
+    with col2:
+        st.subheader("2. Gabarito RGB")
+        st.info("Copie os códigos e cole no Orca Slicer.")
+        
+        for p in st.session_state['palette_data']:
+            c1, c2, c3 = st.columns([1, 2, 3])
+            with c1:
+                st.markdown(f'<div class="color-box" style="background-color: {p["hex"]};"></div>', unsafe_allow_html=True)
+            with c2:
+                st.write(f"**{p['name']}**")
+            with c3:
+                st.code(p['rgb'], language="text")
