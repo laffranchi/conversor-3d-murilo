@@ -5,3 +5,4 @@ pillow
 scikit-learn
 scipy
 networkx
+lxml
